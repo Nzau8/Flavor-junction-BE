@@ -1,0 +1,31 @@
+{
+  "name": "flavor-junction-be",
+  "version": "1.0.0",
+  "description": "Hotel Booking Web Application System",
+  "main": "server.js",
+  "scripts": {
+    "test": "test",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "echo -e \"\nNo build steps required\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nzau8/Flavor-junction-BE.git"
+  },
+  "keywords": [
+    "Hotel",
+    "rooms",
+    "available",
+    "Prices",
+    "desserts",
+    "apt",
+    "suites"
+  ],
+  "author": "1.samuel13-ai",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Nzau8/Flavor-junction-BE/issues"
+  },
+  "homepage": "https://github.com/Nzau8/Flavor-junction-BE#readme"
+}
