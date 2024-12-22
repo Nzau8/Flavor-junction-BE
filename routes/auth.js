@@ -1,52 +1,59 @@
 const express = require('express');
-const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { db } = require('../config/database');
+require('dotenv').config();
 
-// Register User
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+// Registration Route
 router.post('/register', async (req, res) => {
+    const { email, phone, password } = req.body;
+
+    if (!email || !phone || !password) {
+        return res.status(400).json({ message: 'All fields are required.' });
+    }
+
     try {
-        const { username, email, password, phone } = req.body;
-
-        // Check if user exists
-        db.get('SELECT * FROM users WHERE email = ?', [email], async (err, user) => {
+        db.get('SELECT * FROM users WHERE email = ?', [email], async (err, existingUser) => {
             if (err) {
-                return res.status(500).json({ message: 'Server error' });
-            }
-            if (user) {
-                return res.status(400).json({ message: 'User already exists' });
+                return res.status(500).json({ message: 'Server error. Please try again later.' });
             }
 
-            // Hash password
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
+            if (existingUser) {
+                return res.status(400).json({ message: 'Email is already registered.' });
+            }
 
-            // Create user
-            const sql = `INSERT INTO users (username, email, password, phone) VALUES (?, ?, ?, ?)`;
-            db.run(sql, [username, email, hashedPassword, phone], function(err) {
+            // Hash the password
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            db.run('INSERT INTO users (email, phone, password) VALUES (?, ?, ?)', [email, phone, hashedPassword], function (err) {
                 if (err) {
-                    return res.status(500).json({ message: 'Error creating user' });
+                    return res.status(500).json({ message: 'Server error. Please try again later.' });
                 }
 
-                res.status(201).json({ message: 'User registered successfully' });
+                res.status(201).json({ message: 'Registration successful' });
             });
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server error' });
+        res.status(500).json({ message: 'Server error. Please try again later.' });
     }
 });
 
-// Login User
+// Login Route
 router.post('/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
+    const { email, password } = req.body;
 
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    try {
         db.get('SELECT * FROM users WHERE email = ?', [email], async (err, user) => {
             if (err) {
-                return res.status(500).json({ message: 'Server error' });
+                return res.status(500).json({ message: 'Server error. Please try again later.' });
             }
+
             if (!user) {
                 return res.status(400).json({ message: 'Invalid credentials' });
             }
@@ -56,10 +63,9 @@ router.post('/login', async (req, res) => {
                 return res.status(400).json({ message: 'Invalid credentials' });
             }
 
-            // Create JWT token with 15 days expiration
             const token = jwt.sign(
                 { id: user.id },
-                process.env.JWT_SECRET || 'your-secret-key',
+                JWT_SECRET,
                 { expiresIn: '15d' }
             );
 
@@ -67,16 +73,26 @@ router.post('/login', async (req, res) => {
                 token,
                 user: {
                     id: user.id,
-                    username: user.username,
                     email: user.email,
-                    is_admin: user.is_admin
+                    phone: user.phone,
+                    is_admin: user.is_admin || false
                 }
             });
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server error' });
+        res.status(500).json({ message: 'Server error. Please try again later.' });
     }
 });
 
-module.exports = router; 
+
+//lo
+router.post('/logout', (req, res) => {
+    res.clearCookie('token');
+    res.redirect('/'); // 
+});
+
+module.exports = router;
+
+
+module.exports = router;
+
