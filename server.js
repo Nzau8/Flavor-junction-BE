@@ -7,6 +7,18 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const path = require('path');
 const verifyToken = require('./middleware/auth');  // Import the authentication middleware
+// const nodemailer = require("nodemailer");
+
+// Initialize an SMTP service
+// const transporter = nodemailer.createTransport({
+//     host: process.env.SMTP_HOST, // Replace with your SMTP server
+//     port: process.env.SMTP_PORT, // Common port for SMTP
+//     secure: true, // true for 465, false for other ports
+//     auth: {
+//         user: process.env.EMAIL_USER,
+//         pass: process.env.EMAIL_PASS
+//     }
+// });
 
 // Initialize environment variables
 dotenv.config();
@@ -14,8 +26,38 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Middleware setup
-app.use(cors()); // Enable Cross-Origin Resource Sharing
+app.use(cors());
+
+const corsOptions = {
+    origin: [
+      'http://localhost:5500',
+      'http://127.0.0.1:5500',
+      'http://localhost:3001',
+      "smtp.gmail.com",
+    ],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    optionsSuccessStatus: 200
+  };
+  
+  // Apply CORS middleware before routes
+  app.use(cors(corsOptions));
+  
+  // Add CORS headers to all responses
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', true);
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+    next();
+  });
+
 app.use(bodyParser.json()); // Parse incoming JSON data
 
 // Initialize SQLite database
@@ -34,12 +76,31 @@ const db = new sqlite3.Database('./database.db', (err) => {
             )
         `);
         db.run(`
-            CREATE TABLE IF NOT EXISTS bookings (
+            CREATE TABLE IF NOT EXISTS table_booking (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                booking_type TEXT,
-                date TEXT,
-                status TEXT,
+                name TEXT,
+                email VARCHAR(255) NOT NULL,
+                phone VARCHAR(20),
+                date DATE,
+                time TIME,
+                number_of_people INTEGER NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+        `);
+
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS room_booking (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT,
+                email VARCHAR(255) NOT NULL,
+                phone VARCHAR(20),
+                check_in_date DATE,
+                check_out_date DATE,
+                room_type TEXT,
+                guests INTEGER NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
         `);
@@ -84,7 +145,7 @@ app.post('/auth/login', (req, res) => {
     const { email, password } = req.body;
 
 // Logout
-    app.post('/logout', (req, res) => {
+    app.post('/logout', (_req, res) => {
         res.clearCookie('token');
         res.redirect('/index.html');
     });
@@ -107,26 +168,81 @@ app.post('/auth/login', (req, res) => {
             }
 
             // Create JWT token
-            const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+            const token = jwt.sign(
+                { 
+                    id: user.id, 
+                    email: user.email 
+                }, 
+                process.env.JWT_SECRET, 
+                { 
+                    expiresIn: '3600s' 
+
+                }
+            );
 
             res.json({ token });
         });
     });
 });
 
-// Book a Room/Table (Protected)
-app.post('/bookings', verifyToken, (req, res) => {
+// Book a Table (Protected)
+app.post('/api/table-booking', verifyToken, (req, res) => {
     const userId = req.user.id;  // Extract user ID from decoded token
-    const { booking_type, date } = req.body;
+    const { name,email,phone, date,time,number_of_people } = req.body;
 
     // Insert booking into database
-    db.run('INSERT INTO bookings (user_id, booking_type, date, status) VALUES (?, ?, ?, ?)', [userId, booking_type, date, 'Pending'], function (err) {
+    db.run('INSERT INTO table_booking (user_id,name,email,phone, date,time,number_of_people) VALUES (?, ?, ?, ?,?,?,?)',
+         [userId,name,email,phone, date, time,number_of_people], function (err) {
         if (err) {
-            return res.status(500).json({ message: 'Error creating booking', error: err.message });
+            return res.status(500).json({ message: 'Error Reserving your table', error: err.message });
+            
+        }
+        console.log ("Table Booking in progress...");
+        res.json({ message: 'Table reseravation was successful', id: this.lastID });
+
+    });
+});
+
+// Book a Room (Protected)
+app.post('/api/room-booking', verifyToken, (req, res) => {
+    const userId = req.user.id;  // Extract user ID from decoded token
+    const { name,email,phone, check_in_date,check_out_date,room_type,guests } = req.body;
+
+    // Insert booking into database
+    db.run('INSERT INTO room_booking (user_id,name,email,phone,check_in_date,check_out_date,room_type,guests) VALUES (?, ?, ?,?,?,?,?,?)',
+         [userId,name,email,phone, check_in_date, check_out_date,room_type,guests], function (err) {
+        if (err) {
+            return res.status(500).json({ message: 'Error Booking your room', error: err.message });
         }
 
-        res.json({ message: 'Booking successful', bookingId: this.lastID });
+        res.json({ message: 'Booking successful', id: this.lastID });
     });
+
+    // Email options
+    // const mailOptions = {
+    //     from: process.env.EMAIL_USER,
+    //     to: email,
+    //     subject: 'Room Booking Confirmation',
+    //     html: `
+    //     <h3><b>Dear ${name}</b></h3>
+    //     <p>Your room booking has been confirmed.</p>
+    //     <p><strong>Check-in Date:</strong> ${check_in_date}</p>
+    //     <p><strong>Check-out Date:</strong> ${check_out_date}</p>
+    //     <p><strong>Room Type:</strong> ${room_type}</p>
+    //     <p><strong>Number of Guests:</strong> ${guests}</p><br>
+    //     <p>Best regards,</P>
+    //     <p>Patrick Alunya</p>
+    //     <p>Customer Success Management</p>
+    //     `
+    // };
+
+    // Send email
+    // transporter.sendMail(mailOptions, (error, info) => {
+    //     if (error) {
+    //       console.log(error);
+    //     }
+    //     console.log(info);
+    //   });
 });
 
 // Get User's Profile (User Info)
@@ -173,12 +289,12 @@ app.put('/profile', verifyToken, (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Handle 404 errors
-app.use((req, res) => {
+app.use((_req, res) => {
     res.status(404).send('Page not found');
 });
 
 // Handle server errors
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
     console.error(err.stack);
     res.status(500).send('Server error');
 });

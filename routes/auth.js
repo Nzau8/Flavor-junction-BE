@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET || '8f4c9d6e2b7a1f3e5d8c9b4a7f2e1d6c3b8a5f9e2d7c4b1a6f3e8d5c2b9a4f7';
 
 // Registration Route
 router.post('/register', async (req, res) => {
