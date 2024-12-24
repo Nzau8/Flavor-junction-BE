@@ -7,18 +7,18 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const path = require('path');
 const verifyToken = require('./middleware/auth');  // Import the authentication middleware
-// const nodemailer = require("nodemailer");
+const nodemailer = require('nodemailer');
 
-// Initialize an SMTP service
-// const transporter = nodemailer.createTransport({
-//     host: process.env.SMTP_HOST, // Replace with your SMTP server
-//     port: process.env.SMTP_PORT, // Common port for SMTP
-//     secure: true, // true for 465, false for other ports
-//     auth: {
-//         user: process.env.EMAIL_USER,
-//         pass: process.env.EMAIL_PASS
-//     }
-// });
+// Configure the email transporter
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: false, // true for 465, false for other ports
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+    },
+});
 
 // Initialize environment variables
 dotenv.config();
@@ -186,7 +186,7 @@ app.post('/auth/login', (req, res) => {
 });
 
 // Book a Table (Protected)
-app.post('/api/table-booking', verifyToken, (req, res) => {
+app.post('/api/table-booking', verifyToken, async(req, res) => {
     const userId = req.user.id;  // Extract user ID from decoded token
     const { name,email,phone, date,time,number_of_people } = req.body;
 
@@ -201,10 +201,37 @@ app.post('/api/table-booking', verifyToken, (req, res) => {
         res.json({ message: 'Table reseravation was successful', id: this.lastID });
 
     });
+
+    // Send email confirmation
+    try {
+        const emailContent = `
+            <h1>Room Booking Confirmation</h1>
+            <p>Dear ${name},</p>
+            <p>Thank you for booking a room with us. Here are the details:</p>
+            <p><strong>Reservation date:</strong>${date}</p>
+            <p><strong>Reservation time:</strong>${time}</p>
+            <p><strong>Expected guests:</strong>${number_of_people}</p>
+            <p>We look forward to serving you!</p>
+            <p><b>Best regards,<br>Patrick Alunya<br>Flavor-Junction Hotel Customer Success Manager(CSM).</b></p>
+        `;
+
+        await transporter.sendMail({
+            from: `"Flavor-Junction Hotel" <${process.env.SMTP_USER}>`, // Sender address
+            to: email, // Recipient's email
+            subject: 'Room Booking Confirmation', // Subject line
+            html: emailContent, // HTML body
+        });
+
+        res.status(200).json({ message: 'Booking confirmed and email sent' });
+    } catch (error) {
+        console.error('Error sending email:', error);
+        console.log({ message: 'Booking confirmed but failed to send email' });
+    }
+
 });
 
 // Book a Room (Protected)
-app.post('/api/room-booking', verifyToken, (req, res) => {
+app.post('/api/room-booking', verifyToken, async (req, res) => {
     const userId = req.user.id;  // Extract user ID from decoded token
     const { name,email,phone, check_in_date,check_out_date,room_type,guests } = req.body;
 
@@ -218,31 +245,32 @@ app.post('/api/room-booking', verifyToken, (req, res) => {
         res.json({ message: 'Booking successful', id: this.lastID });
     });
 
-    // Email options
-    // const mailOptions = {
-    //     from: process.env.EMAIL_USER,
-    //     to: email,
-    //     subject: 'Room Booking Confirmation',
-    //     html: `
-    //     <h3><b>Dear ${name}</b></h3>
-    //     <p>Your room booking has been confirmed.</p>
-    //     <p><strong>Check-in Date:</strong> ${check_in_date}</p>
-    //     <p><strong>Check-out Date:</strong> ${check_out_date}</p>
-    //     <p><strong>Room Type:</strong> ${room_type}</p>
-    //     <p><strong>Number of Guests:</strong> ${guests}</p><br>
-    //     <p>Best regards,</P>
-    //     <p>Patrick Alunya</p>
-    //     <p>Customer Success Management</p>
-    //     `
-    // };
+    // Send email confirmation
+    try {
+        const emailContent = `
+            <h1>Room Booking Confirmation</h1>
+            <p>Dear ${name},</p>
+            <p>Thank you for booking a room with us. Here are the details:</p>
+            <p><strong>Check in data:</strong>${check_in_date}</p>
+            <p><strong>Checkout Date:</strong>${check_out_date}</p>
+            <p><strong>Room Type:</strong>${room_type}</p>
+            <p><strong>Expected guest:</strong>${guests}</p>
+            <p>We look forward to serving you!</p>
+            <p><b>Best regards,<br>Patrick Alunya<br>Flavor-Junction Hotel Customer Success Manager(CSM).</b></p>
+        `;
 
-    // Send email
-    // transporter.sendMail(mailOptions, (error, info) => {
-    //     if (error) {
-    //       console.log(error);
-    //     }
-    //     console.log(info);
-    //   });
+        await transporter.sendMail({
+            from: `"Flavor-Junction Hotel" <${process.env.SMTP_USER}>`, // Sender address
+            to: email, // Recipient's email
+            subject: 'Room Booking Confirmation', // Subject line
+            html: emailContent, // HTML body
+        });
+
+        res.status(200).json({ message: 'Booking confirmed and email sent' });
+    } catch (error) {
+        console.error('Error sending email:', error);
+        console.log({ message: 'Booking confirmed but failed to send email' });
+    }
 });
 
 // Get User's Profile (User Info)
