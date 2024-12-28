@@ -9,17 +9,6 @@ const path = require('path');
 const verifyToken = require('./middleware/auth');  // Import the authentication middleware
 const nodemailer = require('nodemailer');
 
-// Configure the email transporter
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    secure: false, // true for 465, false for other ports
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
-
 // Initialize environment variables
 dotenv.config();
 
@@ -73,9 +62,24 @@ const db = new sqlite3.Database('./database.db', (err) => {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE,
                 phone TEXT NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                is_admin BOOLEAN DEFAULT 0
             )
         `);
+
+        // Create an admin account
+        // const email = 'admin@hotel.com';
+        //     const password = 'admin123';
+        //     const phone = '1234567890';
+        //     const hashedPassword = bcrypt.hashSync(password, 10);
+        //     console.log('Creating admin account...');
+        //     db.run('INSERT INTO users (email, phone, password, is_admin) VALUES (?, ?, ?, ?)', [email, phone, hashedPassword, true], function (err) {
+        //         if (err) {
+        //             console.log(err);
+        //         } else {
+        //             console.log('Admin account created');
+        //         }
+        //     });         
         db.run(`
             CREATE TABLE IF NOT EXISTS table_booking (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,7 +180,7 @@ app.post('/auth/login', (req, res) => {
                 }, 
                 process.env.JWT_SECRET, 
                 { 
-                    expiresIn: '3600s' 
+                    expiresIn: '15d' 
 
                 }
             );
@@ -184,6 +188,51 @@ app.post('/auth/login', (req, res) => {
             res.json({ token });
         });
     });
+});
+
+// Admin Login Endpoint 
+// /api/admin/auth/login
+app.post('/admin/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    try {
+        db.get('SELECT * FROM users WHERE email = ? AND is_admin = 1', [email], async (err, user) => {
+            if (err) {
+                return res.status(500).json({ message: 'Server error. Please try again later.' });
+            }
+
+            if (!user) {
+                return res.status(400).json({ message: 'Invalid credentials' });
+            }
+
+            const isMatch = await bcrypt.compare(password, user.password);
+            if (!isMatch) {
+                return res.status(400).json({ message: 'Invalid credentials' });
+            }
+
+            const token = jwt.sign(
+                { id: user.id },
+                JWT_SECRET,
+                { expiresIn: '15d' }
+            );
+
+            res.json({
+                token,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    phone: user.phone,
+                    is_admin: user.is_admin || false
+                }
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error. Please try again later.' });
+    }
 });
 
 // Book a Table (Protected)
@@ -200,34 +249,8 @@ app.post('/api/table-booking', verifyToken, async(req, res) => {
         }
         console.log ("Table Booking in progress...");
         res.json({ message: 'Table reseravation was successful', id: this.lastID });
-
+        
     });
-
-    // Send email confirmation
-    try {
-        const emailContent = `
-            <h1>Room Booking Confirmation</h1>
-            <p>Dear ${name},</p>
-            <p>Thank you for booking a room with us. Here are the details:</p>
-            <p><strong>Reservation date:</strong>${date}</p>
-            <p><strong>Reservation time:</strong>${time}</p>
-            <p><strong>Expected guests:</strong>${number_of_people}</p>
-            <p>We look forward to serving you!</p>
-            <p><b>Best regards,<br>Patrick Alunya<br>Flavor-Junction Hotel Customer Success Manager(CSM).</b></p>
-        `;
-
-        await transporter.sendMail({
-            from: `"Flavor-Junction Hotel" <${process.env.SMTP_USER}>`, // Sender address
-            to: email, // Recipient's email
-            subject: 'Room Booking Confirmation', // Subject line
-            html: emailContent, // HTML body
-        });
-
-        res.status(200).json({ message: 'Booking confirmed and email sent' });
-    } catch (error) {
-        console.error('Error sending email:', error);
-        console.log({ message: 'Booking confirmed but failed to send email' });
-    }
 
 });
 
@@ -245,33 +268,6 @@ app.post('/api/room-booking', verifyToken, async (req, res) => {
 
         res.json({ message: 'Booking successful', id: this.lastID });
     });
-
-    // Send email confirmation
-    try {
-        const emailContent = `
-            <h1>Room Booking Confirmation</h1>
-            <p>Dear ${name},</p>
-            <p>Thank you for booking a room with us. Here are the details:</p>
-            <p><strong>Check in data:</strong>${check_in_date}</p>
-            <p><strong>Checkout Date:</strong>${check_out_date}</p>
-            <p><strong>Room Type:</strong>${room_type}</p>
-            <p><strong>Expected guest:</strong>${guests}</p>
-            <p>We look forward to serving you!</p>
-            <p><b>Best regards,<br>Patrick Alunya<br>Flavor-Junction Hotel Customer Success Manager(CSM).</b></p>
-        `;
-
-        await transporter.sendMail({
-            from: `"Flavor-Junction Hotel" <${process.env.SMTP_USER}>`, // Sender address
-            to: email, // Recipient's email
-            subject: 'Room Booking Confirmation', // Subject line
-            html: emailContent, // HTML body
-        });
-
-        res.status(200).json({ message: 'Booking confirmed and email sent' });
-    } catch (error) {
-        console.error('Error sending email:', error);
-        console.log({ message: 'Booking confirmed but failed to send email' });
-    }
 });
 
 // Get User's Profile (User Info)
@@ -288,17 +284,139 @@ app.get('/user/profile', verifyToken, (req, res) => {
 });
 
 // Get User's Bookings
-app.get('/user/bookings', verifyToken, (req, res) => {
+app.get('/api/roomBookings', verifyToken, (req, res) => {
     const userId = req.user.id;
+    // const userId = req.user.id;
+    // const name = req.room_booking.name;
+    // const email = req.room_booking.email;
+    // const phone = req.room_booking.phone;
+    // const check_in_date = req.room_booking.check_in_date;
+    // const check_out_date = req.room_booking.check_out_date;
+    // const room_type = req.room_booking.room_type;
+    // const guests = req.room_booking.guests;
 
-    db.all('SELECT * FROM bookings WHERE user_id = ?', [userId], (err, bookings) => {
+    db.all('SELECT * FROM room_booking WHERE user_id=?', [userId], (err, room_booking) => {
         if (err) {
             return res.status(500).json({ message: 'Error fetching bookings', error: err.message });
         }
 
-        res.json(bookings);
+        res.json(room_booking);
     });
 });
+
+// Get User's Bookings
+app.get('/api/tableBookings', verifyToken, (req, res) => {
+    const userId = req.user.id;
+    // const userId = req.user.id;
+    // const name = req.room_booking.name;
+    // const email = req.room_booking.email;
+    // const phone = req.room_booking.phone;
+    // const check_in_date = req.room_booking.check_in_date;
+    // const check_out_date = req.room_booking.check_out_date;
+    // const room_type = req.room_booking.room_type;
+    // const guests = req.room_booking.guests;
+
+    db.all('SELECT * FROM table_booking WHERE user_id=?', [userId], (err, table_booking) => {
+        if (err) {
+            return res.status(500).json({ message: 'Error fetching bookings', error: err.message });
+        }
+
+        res.json(table_booking);
+    });
+});
+
+// Email transporter configuration
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+  
+  // Verify transporter
+  transporter.verify(function(error, _success) {
+    if (error) {
+      console.log('Server error:', error);
+    } else {
+      console.log('Server is ready to take our messages');
+    }
+  });
+  
+
+  
+// Contact form endpoint with validation
+app.post('/api/sendEmail', verifyToken, async (req, res) => {
+  try {
+    const { name, email, checkInDate, checkOutDate, roomType, guests } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !checkInDate || !checkOutDate || !roomType || !guests) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Email content
+    const mailOptions = {
+      from: process.env.SMTP_USER,
+      to: email,
+      subject: 'Flavor Hotel Booking Confirmation',
+      html: `
+        <h3>Hotel Booking Confirmation</h3>
+        <p><strong>Dear</strong> ${name}</p>
+        <p><strong>You are receiving this email from Flavor-Junction Hotel Because you requested to reserve a room with us.</strong></p>
+        <p><strong>Please find below the details for follow up:</strong></p>
+        <p><strong>Check In Date:</strong> ${checkInDate}</p>
+        <p><strong>Check Out Date:</strong> ${checkOutDate}</p>
+        <p><strong>Room Type:</strong> ${roomType}</p>
+        <p><strong>Expected Guest:</strong> ${guests}</p>
+      `
+    };
+
+    // Send email
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({ message: 'Booking confirmation sent successfully' });
+  } catch (error) {
+    console.error('Error sending email:', error);
+    res.status(500).json({ message: 'Error sending booking confirmation', error: error.message });
+  }
+});
+
+// Contact form endpoint with validation
+app.post('/api/tableBookingSendEmail', verifyToken, async (req, res) => {
+    try {
+      const { id, user_id, name, email, phone, date, time, number_of_people } = req.body;
+  
+      // Validate required fields
+      if ( !id || !user_id || !name || !email || !phone || !date || !time || !number_of_people ) {
+        return res.status(400).json({ message: 'All fields are required' });
+      }
+  
+      // Email content
+      const mailOptions = {
+        from: process.env.SMTP_USER,
+        to: email,
+        subject: 'Flavor Hotel Booking Confirmation',
+        html: `
+          <h3>Hotel Booking Confirmation</h3>
+          <p><strong>Dear</strong> ${name}</p>
+          <p><strong>You are receiving this email from Flavor-Junction Hotel Because you requested to reserve a room with us.</strong></p>
+          <p><strong>Please find below the details for follow up:</strong></p>
+          <p><strong>Reservation Date:</strong> ${date}</p>
+          <p><strong>Time:</strong> ${time}</p>
+          <p><strong>Expected Guest:</strong> ${number_of_people}</p>
+        `
+      };
+  
+      // Send email
+      await transporter.sendMail(mailOptions);
+  
+      res.status(200).json({ message: 'Booking confirmation sent successfully' });
+    } catch (error) {
+      console.error('Error sending email:', error);
+      res.status(500).json({ message: 'Error sending booking confirmation', error: error.message });
+    }
+  });
 
 // Update User Profile (Optional)
 app.put('/profile', verifyToken, (req, res) => {

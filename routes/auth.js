@@ -84,15 +84,57 @@ router.post('/login', async (req, res) => {
     }
 });
 
+// Admin Login Endpoint 
+// /api/admin/auth/login
+router.post('/admin/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    try {
+        db.get('SELECT * FROM users WHERE email = ? AND is_admin = 1', [email], async (err, user) => {
+            if (err) {
+                return res.status(500).json({ message: 'Server error. Please try again later.' });
+            }
+
+            if (!user) {
+                return res.status(400).json({ message: 'Invalid credentials' });
+            }
+
+            const isMatch = await bcrypt.compare(password, user.password);
+            if (!isMatch) {
+                return res.status(400).json({ message: 'Invalid credentials' });
+            }
+
+            const token = jwt.sign(
+                { id: user.id },
+                JWT_SECRET,
+                { expiresIn: '15d' }
+            );
+
+            res.json({
+                token,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    phone: user.phone,
+                    is_admin: user.is_admin || false
+                }
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error. Please try again later.' });
+    }
+});
+
 
 //lo
 router.post('/logout', (req, res) => {
     res.clearCookie('token');
     res.redirect('/'); // 
 });
-
-module.exports = router;
-
 
 module.exports = router;
 
