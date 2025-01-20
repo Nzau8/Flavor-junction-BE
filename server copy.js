@@ -2,7 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const sqlite3 = require('sqlite3').verbose();
+const mysql = require('mysql2');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const path = require('path');
@@ -13,7 +13,7 @@ const nodemailer = require('nodemailer');
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3000;
 
 app.use(cors());
 
@@ -21,9 +21,10 @@ const corsOptions = {
     origin: [
       'http://localhost:5500',
       'http://127.0.0.1:5500',
-      'http://localhost:3001',
+      'http://localhost:3000',
       'https://flavor-junction-fe.netlify.app',
-      'https://flavor-junction-be.onrender.com'
+      'https://flavor-junction-be.onrender.com',
+      'flavor-junction-db-flavor-junction-db.g.aivencloud.com'
     ],
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -51,69 +52,84 @@ const corsOptions = {
 app.use(bodyParser.json()); // Parse incoming JSON data
 
 // Initialize SQLite database
-const db = new sqlite3.Database('./database.db', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+// Create a MySQL connection
+const db = mysql.createPool({
+    host: 'flavor-junction-db-flavor-junction-db.g.aivencloud.com',
+    user: 'avnadmin',
+    password: 'AVNS_5gJSPjQL1dbTPCNGss4',
+    database: 'flavor-junction-db',
+    port: 13797,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 30000 // 30 seconds
+});
+
+// Connect to the MySQL database
+db.getConnection((err, connection) => {
     if (err) {
-        console.error('Error opening database:', err.message);
+        console.error('Error connecting to MySQL database:', err.message);
     } else {
-        console.log('Connected to SQLite database');
+        console.log('Connected to MySQL database');
         // Initialize database (create tables if they don't exist)
-        db.run(`
+        connection.query(`
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL UNIQUE,
-                phone TEXT NOT NULL,
-                password TEXT NOT NULL,
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                phone VARCHAR(20) NOT NULL,
+                password VARCHAR(255) NOT NULL,
                 is_admin BOOLEAN DEFAULT 0
             )
-        `);
+        `, (err) => {
+            if (err) {
+                console.error('Error creating users table:', err.message);
+            }
+            console.log('Users Table created');
+        });
 
-        // Create an admin account
-        // const email = 'admin@hotel.com';
-        //     const password = 'admin123';
-        //     const phone = '1234567890';
-        //     const hashedPassword = bcrypt.hashSync(password, 10);
-        //     console.log('Creating admin account...');
-        //     db.run('INSERT INTO users (email, phone, password, is_admin) VALUES (?, ?, ?, ?)', [email, phone, hashedPassword, true], function (err) {
-        //         if (err) {
-        //             console.log(err);
-        //         } else {
-        //             console.log('Admin account created');
-        //         }
-        //     });         
-        db.run(`
+        connection.query(`
             CREATE TABLE IF NOT EXISTS table_booking (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                name TEXT,
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                name VARCHAR(255),
                 email VARCHAR(255) NOT NULL,
                 phone VARCHAR(20),
                 date DATE,
                 time TIME,
-                number_of_people INTEGER NOT NULL,
+                number_of_people INT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
-        `);
+        `, (err) => {
+            if (err) {
+                console.error('Error creating table_booking table:', err.message);
+            }
+        });
 
-
-        db.run(`
+        connection.query(`
             CREATE TABLE IF NOT EXISTS room_booking (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                name TEXT,
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                name VARCHAR(255),
                 email VARCHAR(255) NOT NULL,
                 phone VARCHAR(20),
                 check_in_date DATE,
                 check_out_date DATE,
-                room_type TEXT,
-                guests INTEGER NOT NULL,
+                room_type VARCHAR(255),
+                guests INT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
-        `);
+        `, (err) => {
+            if (err) {
+                console.error('Error creating room_booking table:', err.message);
+            }
+        });
+
+        connection.release();
     }
 });
 
 // Set the db object to be accessible from other files
-global.db = db;
+global.db = db.promise();
 
 // Import Routes
 const authRoutes = require('./routes/auth');
@@ -134,11 +150,11 @@ app.post('/auth/register', async (req, res) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        db.run('INSERT INTO users (email, phone, password) VALUES (?, ?, ?)', [email, phone, hashedPassword], function (err) {
+        db.query('INSERT INTO users (email, phone, password) VALUES (?, ?, ?)', [email, phone, hashedPassword], function (err, results) {
             if (err) {
                 return res.status(500).json({ message: 'Error registering user', error: err.message });
             }
-            res.json({ message: 'User registered successfully' });
+            res.json({ message: 'User registered successfully', id: results.insertId });
         });
     } catch (err) {
         return res.status(500).json({ message: 'Error hashing password', error: err.message });
@@ -161,10 +177,12 @@ app.post('/auth/login', (req, res) => {
         return res.status(400).json({ message: 'Email and password are required.' });
     }
 
-    db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
-        if (err || !user) {
+    db.query('SELECT * FROM users WHERE email = ?', [email], (err, results) => {
+        if (err || results.length === 0) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
+
+        const user = results[0];
 
         // Compare password with the stored hash
         bcrypt.compare(password, user.password, (err, isMatch) => {
@@ -200,14 +218,16 @@ app.post('/admin/login', async (req, res) => {
     }
 
     try {
-        db.get('SELECT * FROM users WHERE email = ? AND is_admin = 1', [email], async (err, user) => {
+        db.query('SELECT * FROM users WHERE email = ? AND is_admin = 1', [email], async (err, results) => {
             if (err) {
                 return res.status(500).json({ message: 'Server error. Please try again later.' });
             }
 
-            if (!user) {
+            if (results.length === 0) {
                 return res.status(400).json({ message: 'Invalid credentials' });
             }
+
+            const user = results[0];
 
             const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
@@ -216,7 +236,7 @@ app.post('/admin/login', async (req, res) => {
 
             const token = jwt.sign(
                 { id: user.id },
-                JWT_SECRET,
+                process.env.JWT_SECRET,
                 { expiresIn: '15d' }
             );
 
@@ -241,14 +261,14 @@ app.post('/api/table-booking', verifyToken, async(req, res) => {
     const { name,email,phone, date,time,number_of_people } = req.body;
 
     // Insert booking into database
-    db.run('INSERT INTO table_booking (user_id,name,email,phone, date,time,number_of_people) VALUES (?, ?, ?, ?,?,?,?)',
+    db.query('INSERT INTO table_booking (user_id,name,email,phone, date,time,number_of_people) VALUES (?, ?, ?, ?,?,?,?)',
          [userId,name,email,phone, date, time,number_of_people], function (err) {
         if (err) {
             return res.status(500).json({ message: 'Error Reserving your table', error: err.message });
             
         }
         console.log ("Table Booking in progress...");
-        res.json({ message: 'Table reseravation was successful', id: this.lastID });
+        res.json({ message: 'Table reseravation was successful', id: this.insertId });
         
     });
 
@@ -260,13 +280,13 @@ app.post('/api/room-booking', verifyToken, async (req, res) => {
     const { name,email,phone, check_in_date,check_out_date,room_type,guests } = req.body;
 
     // Insert booking into database
-    db.run('INSERT INTO room_booking (user_id,name,email,phone,check_in_date,check_out_date,room_type,guests) VALUES (?, ?, ?,?,?,?,?,?)',
+    db.query('INSERT INTO room_booking (user_id,name,email,phone,check_in_date,check_out_date,room_type,guests) VALUES (?, ?, ?,?,?,?,?,?)',
          [userId,name,email,phone, check_in_date, check_out_date,room_type,guests], function (err) {
         if (err) {
             return res.status(500).json({ message: 'Error Booking your room', error: err.message });
         }
 
-        res.json({ message: 'Booking successful', id: this.lastID });
+        res.json({ message: 'Booking successful', id: this.insertId });
     });
 });
 
@@ -274,12 +294,12 @@ app.post('/api/room-booking', verifyToken, async (req, res) => {
 app.get('/user/profile', verifyToken, (req, res) => {
     const userId = req.user.id;
 
-    db.get('SELECT email, phone FROM users WHERE id = ?', [userId], (err, user) => {
-        if (err || !user) {
+    db.query('SELECT email, phone FROM users WHERE id = ?', [userId], (err, results) => {
+        if (err || results.length === 0) {
             return res.status(500).json({ message: 'Error fetching user data', error: err.message });
         }
 
-        res.json(user);
+        res.json(results[0]);
     });
 });
 
@@ -295,12 +315,12 @@ app.get('/api/roomBookings', verifyToken, (req, res) => {
     // const room_type = req.room_booking.room_type;
     // const guests = req.room_booking.guests;
 
-    db.all('SELECT * FROM room_booking WHERE user_id=?', [userId], (err, room_booking) => {
+    db.query('SELECT * FROM room_booking WHERE user_id=?', [userId], (err, results) => {
         if (err) {
             return res.status(500).json({ message: 'Error fetching bookings', error: err.message });
         }
 
-        res.json(room_booking);
+        res.json(results);
     });
 });
 
@@ -316,12 +336,12 @@ app.get('/api/tableBookings', verifyToken, (req, res) => {
     // const room_type = req.room_booking.room_type;
     // const guests = req.room_booking.guests;
 
-    db.all('SELECT * FROM table_booking WHERE user_id=?', [userId], (err, table_booking) => {
+    db.query('SELECT * FROM table_booking WHERE user_id=?', [userId], (err, results) => {
         if (err) {
             return res.status(500).json({ message: 'Error fetching bookings', error: err.message });
         }
 
-        res.json(table_booking);
+        res.json(results);
     });
 });
 
@@ -423,7 +443,7 @@ app.put('/profile', verifyToken, (req, res) => {
     const userId = req.user.id;
     const { email, phone } = req.body;
 
-    db.run('UPDATE users SET email = ?, phone = ? WHERE id = ?', [email, phone, userId], function (err) {
+    db.query('UPDATE users SET email = ?, phone = ? WHERE id = ?', [email, phone, userId], function (err) {
         if (err) {
             return res.status(500).json({ message: 'Error updating profile', error: err.message });
         }
